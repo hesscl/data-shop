@@ -76,9 +76,7 @@ forrent <- natrent %>%
   mutate(scraped_time = parse_datetime(scraped_time),
          date = date(scraped_time),
          is_bldg = str_detect(bedrooms, "-"),
-         rent = parse_number(rent),
          beds = str_replace(bedrooms, "Studio", "0"),
-         beds = parse_number(beds),
          baths = NA,
          sqft = NA) %>%
   mutate_if(is_character,
@@ -89,17 +87,49 @@ forrent <- natrent %>%
 #building summary
 forrent %>% group_by(is_bldg) %>% tally %>% mutate(prop = n/sum(n))
 
-#forrent <- arcpy_geocode(forrent, run_fields = "address")
-
+#prepare the building data
+forrent_bldg <- forrent %>%
+  filter(is_bldg) %>%
+  mutate(beds = str_remove(beds, " Beds"),
+         rent = str_remove_all(rent, "$|,")) %>%
+  separate(rent, c("rent_lower", "rent_upper"), sep = "-|-", remove = FALSE) %>%
+  separate(beds, c("beds_lower", "beds_upper"), sep = "-|-", remove = FALSE) %>%
+  mutate_at(vars(ends_with("lower"), ends_with("upper")), parse_number) %>%
+  filter(!is.na(beds_lower) & !is.na(beds_upper)) %>%
+  mutate(bldg_id = row_number())
+  
 #function to handle linear imputation of beds/rent between upper and lower values
-build_grid <- function(row){
-  grid <- tibble(bldg_id = trulia_bldg$bldg_id[row],
-                 beds = trulia_bldg$beds_lower[row]:trulia_bldg$beds_upper[row])
-  slope <- (trulia_bldg$rent_upper[row] - trulia_bldg$rent_lower[row])/length(unique(grid$beds))
-  grid$rent <- trulia_bldg$rent_lower[row] + slope * (grid$beds - min(grid$beds))
+build_forrent_grid <- function(row){
+  grid <- tibble(bldg_id = forrent_bldg$bldg_id[row],
+                 beds = forrent_bldg$beds_lower[row]:forrent_bldg$beds_upper[row])
+  slope <- (forrent_bldg$rent_upper[row] - forrent_bldg$rent_lower[row])/(length(unique(grid$beds))-1)
+  grid$rent <- forrent_bldg$rent_lower[row] + slope * (grid$beds - min(grid$beds))
   grid$beds <- as.character(grid$beds)
   grid
 }
+
+#pass each row of forrent_bldg to build_forrent_grid
+forrent_bldg_grid <- map(1:nrow(forrent_bldg), build_forrent_grid)
+
+#reduce resulting list into a single data frame
+forrent_bldg_grid <- reduce(forrent_bldg_grid, bind_rows)
+
+#append building information onto the data
+forrent_bldg_grid <- forrent_bldg_grid %>%
+  left_join(forrent_bldg %>% select(-rent, -beds, -baths))
+
+#now clean up the unit data to the right column types
+forrent <- forrent %>%
+  filter(!is_bldg) %>%
+  mutate_at(vars(rent), parse_number) %>%
+  mutate(rent_lower = NA, rent_upper = NA,
+         beds_lower = NA, beds_upper = NA)
+
+#now reassemble the unit and building data into single df
+forrent <- bind_rows(forrent, forrent_bldg_grid) %>%
+  mutate(beds = parse_number(beds))
+
+#forrent <- arcpy_geocode(forrent, run_fields = "address")
 
 
 #### Query homes.com -----------------------------------------------------------
@@ -301,17 +331,17 @@ trulia_bldg <- trulia %>%
   mutate(bldg_id = row_number())
 
 #function to handle linear imputation of beds/rent between upper and lower values
-build_grid <- function(row){
+build_trulia_grid <- function(row){
   grid <- tibble(bldg_id = trulia_bldg$bldg_id[row],
                  beds = trulia_bldg$beds_lower[row]:trulia_bldg$beds_upper[row])
-  slope <- (trulia_bldg$rent_upper[row] - trulia_bldg$rent_lower[row])/length(unique(grid$beds))
+  slope <- (trulia_bldg$rent_upper[row] - trulia_bldg$rent_lower[row])/(length(unique(grid$beds))-1)
   grid$rent <- trulia_bldg$rent_lower[row] + slope * (grid$beds - min(grid$beds))
   grid$beds <- as.character(grid$beds)
   grid
 }
 
 #create list of data frames with interpolated values
-trulia_bldg_grid <- map(1:nrow(trulia_bldg), build_grid)
+trulia_bldg_grid <- map(1:nrow(trulia_bldg), build_trulia_grid)
 
 #reduce list into a single data frame
 trulia_bldg_grid <- reduce(trulia_bldg_grid, bind_rows)
@@ -327,6 +357,7 @@ trulia <- trulia %>%
   mutate(rent_lower = NA, rent_upper = NA,
          beds_lower = NA, beds_upper = NA)
 
+#now reassemble the unit and building data into single df
 trulia <- bind_rows(trulia, trulia_bldg_grid) %>%
   mutate(beds = parse_number(beds))
   
@@ -482,7 +513,7 @@ acs_sum <- read_csv("./census/msa_contractrent_2bed_acs_2018.csv", n_max = 5) %>
   rename(metro_name = msa) %>%
   left_join(county %>% st_drop_geometry() %>% distinct(metro_name, cbsafp)) %>%
   rename_at(vars(starts_with("pct_")), function(x){str_replace(x, "pct_", "q")}) %>%
-  mutate(cat_beds = "2", source = "2018 ACS", n = NA, sd = NA, iqr = NA)
+  mutate(cat_beds = "2", source = "2018 ACS", n = NA)
 
 
 #### Combine viable sources for rent estimation, summarize ---------------------
@@ -514,8 +545,13 @@ pad_sum <- pad %>%
   select(cbsafp, fips, namelsad, beds, rent, inv) %>%
   mutate(source = "Padmapper")
 
+forrent_sum <- pad %>%
+  select(cbsafp, fips, namelsad, beds, rent) %>%
+  mutate(source = "Forrent.com", inv = 1)
+
 #combine the listings and prepare for analysis
-listings <- bind_rows(cl_sum, apts_sum, gos8_sum, trulia_sum, zillow_sum, pad_sum) %>%
+listings <- bind_rows(cl_sum, apts_sum, gos8_sum, trulia_sum, zillow_sum, 
+                      pad_sum, forrent_sum) %>%
   filter(!is.na(beds), !is.na(rent), 
          rent > 50, rent < 15000) %>%
   mutate(cat_beds = case_when(
@@ -539,8 +575,8 @@ sum_tbl <- listings %>%
             q75 = wtd.quantile(rent, .75, weight = inv),
             q90 = wtd.quantile(rent, .90, weight = inv),
             q95 = wtd.quantile(rent, .95, weight = inv)) %>%
-  mutate(iqr = q75 - q25) %>%
-  bind_rows(acs_sum)
+  bind_rows(acs_sum) %>%
+  mutate(iqr = q75 - q25)
 
 
 #### Save summary table to disk ------------------------------------------------
