@@ -48,6 +48,7 @@ ggplot(rent_plot %>% filter(cat_beds == "2"),
   geom_line() +
   scale_x_continuous(breaks = unique(rent_plot$p_rank)) + 
   scale_y_continuous(labels = scales::dollar) +
+  scale_color_discrete(direction = -1) +
   theme_bw() +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(reverse = TRUE, nrow = 1)) +
@@ -63,7 +64,7 @@ iqr_plot <- sum_tbl %>%
 #IQR for 2 bedroom units
 ggplot(iqr_plot, 
        aes(x = source, y = iqr, color = source)) +
-  coord_flip(ylim = c(0, 900)) +
+  coord_flip(ylim = c(0, 925)) +
   facet_wrap(~ metro_name) +
   geom_segment(aes(x = source, xend = source, y = 0, yend = iqr)) +
   geom_point(size = 8) +
