@@ -98,15 +98,15 @@ ggplot(iqr_plot,
 #data for plotting ratio of scraped source median to ACS median
 acs_ratio_plot <- acs_fmr %>%
   mutate(metro_name = str_split_fixed(metro_name, ", ", n = 2)[,1],
-         source = "2019 FMR")  %>%
+         source = "2020 FMR")  %>%
   rename(value = fmr)
 
 rent_ratio_plot <- rent_plot %>%
-  filter(p_rank == 50, cat_beds == "2", source != "2018 ACS") %>%
+  filter(p_rank == 40, cat_beds == "2", source != "2018 ACS") %>%
   bind_rows(acs_ratio_plot) %>%
   group_by(metro_name) %>%
-  mutate(ratio = value / value[source == "2019 FMR"]) %>%
-  filter(source != "2019 FMR") 
+  mutate(ratio = value / value[source == "2020 FMR"]) %>%
+  filter(source != "2020 FMR") 
 
 rent_ratio_plot$source <- factor(rent_ratio_plot$source)
 rent_ratio_plot$source <- factor(rent_ratio_plot$source, 
@@ -115,7 +115,7 @@ rent_ratio_plot$source <- factor(rent_ratio_plot$source,
 #rent ratio plot
 ggplot(rent_ratio_plot, 
        aes(x = source, y = ratio, color = source)) +
-  coord_flip(ylim = c(.65, 1.6)) +
+  coord_flip(ylim = c(.6, 1.5)) +
   facet_wrap(~ metro_name) +
   geom_segment(aes(x = source, xend = source, y = 0, yend = ratio)) +
   geom_point(size = 8) +
@@ -124,7 +124,7 @@ ggplot(rent_ratio_plot,
   theme_bw() +
   theme(legend.position = "bottom", panel.spacing = unit(.2, "in")) +
   guides(color = FALSE) +
-  labs(x = "Source\n", y = "\nSource Median Rent ÷ 2019 Fair Market Rent", color = "") +
+  labs(x = "Source\n", y = "\nSource 40th Percentile ÷ 2020 Fair Market Rent") +
   ggsave(filename = "./output/rent_ratio_by_metro_and_source.png",
          width = 8, height = 6, dpi = 300)
 
