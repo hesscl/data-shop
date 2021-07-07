@@ -164,7 +164,7 @@ beds_plot$cat_beds <- fct_rev(beds_plot$cat_beds)
 #make plot
 ggplot(beds_plot, aes(x = source, y = prop, fill = cat_beds)) +
   coord_flip() +
-  facet_wrap(~ metro_name) +
+  facet_wrap(~ metro_name, scales='free_x') +
   geom_bar(stat = "identity", position = "stack") +
   scale_y_continuous(labels = scales::percent) +
   scale_fill_viridis_d(option = "D", direction = 1) +
